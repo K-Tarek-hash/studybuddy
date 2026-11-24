@@ -3,26 +3,30 @@ that remember your mistakes and drill them next time."""
 import hashlib
 import io
 import json
+import os
 import random
+import re
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections import Counter
 from pathlib import Path
 
-import anthropic
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pypdf import PdfReader
 
-from search import BM25, chunk_pages
+from search import BM25, chunk_pages, tokenize
 
-MODEL = "claude-opus-5-5"
+# Local AI through Ollama (https://ollama.com): free, no account, no API key, works offline.
+MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+OLLAMA = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 ROOT = Path(__file__).parent
 PROGRESS_FILE = ROOT / "data" / "progress.json"
 SIZES = {"quiz": 10, "drill": 5, "mock": 30}
 
-client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
 app = FastAPI(title="StudyBuddy")
 DOCS = {}     # doc_id -> parsed PDF + search index (rebuilt on upload)
 QUIZZES = {}  # quiz_id -> full questions incl. answers (never sent to the browser before submit)
@@ -55,7 +59,7 @@ def weak_topics(p, limit=6):
     return [{"topic": n, "right": round(acc * t), "total": t} for acc, t, n in sorted(rows)[:limit]]
 
 
-# ---------- Claude ----------
+# ---------- local AI ----------
 QUESTION = {
     "type": "object",
     "properties": {
@@ -84,34 +88,33 @@ Rules:
 - Exams copy slide sentences, so reuse the exact wording of the excerpts.
 - A false True/False statement flips ONE key word of a real sentence (likely/unlikely, first/final, more/less).
 - Wrong options must be plausible: similar-sounding terms from the same material, so only a student who knows the slide gets it right.
+- Write like a professor setting an exam about the SUBJECT. Never mention "the excerpt", "the text", "the chart", "the candidate" or page numbers inside a question.
 - No calculations unless the excerpts are about calculations.
 - "why": one line quoting the fact that makes the answer right.
 - "hook": a short memory trick (under 15 words) for the concept.
 - "topic": the concept tested, 2-4 words, reuse the same name for the same concept.
 - "page": the page the fact comes from.
-- Never repeat, or lightly reword, any question listed under "Already asked"."""
+- Every question must test a different fact."""
 
 
-def claude(system, prompt, schema=None):
-    kwargs = {"output_config": {"format": {"type": "json_schema", "schema": schema}}} if schema else {}
+def llm(system, prompt, schema=None, temperature=0.4):
+    """One chat call to the local Ollama server. `schema` forces JSON output in that shape."""
+    body = {"model": MODEL, "stream": False, "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+            "options": {"temperature": temperature, "num_ctx": 8192}}
+    if schema:
+        body["format"] = schema
+    req = urllib.request.Request(f"{OLLAMA}/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     try:
-        resp = client.beta.messages.create(
-            model=MODEL, max_tokens=16000, system=system,
-            messages=[{"role": "user", "content": prompt}],
-            betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-            **kwargs,
-        )
-    except (anthropic.AuthenticationError, TypeError):  # TypeError = no credentials configured at all
-        raise HTTPException(500, "Missing or invalid ANTHROPIC_API_KEY")
-    except anthropic.RateLimitError:
-        raise HTTPException(429, "Rate limited, try again in a minute")
-    except anthropic.APIStatusError as e:
-        raise HTTPException(502, f"Claude API error: {e.message}")
-    except anthropic.APIConnectionError:
-        raise HTTPException(502, "Could not reach the Claude API")
-    if resp.stop_reason == "refusal":
-        raise HTTPException(400, "Claude declined this request")
-    return "".join(b.text for b in resp.content if b.type == "text")
+        with urllib.request.urlopen(req, timeout=600) as r:
+            return json.loads(r.read())["message"]["content"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise HTTPException(500, f"Model not downloaded yet. Run: ollama pull {MODEL}")
+        raise HTTPException(502, f"Ollama error: {e.read().decode(errors='replace')[:200]}")
+    except (urllib.error.URLError, ConnectionError):
+        raise HTTPException(503, "Ollama isn't running. Install it from ollama.com, then open the Ollama app.")
+    except TimeoutError:
+        raise HTTPException(504, "The local model took too long. Try a smaller quiz.")
 
 
 def context(chunks):
@@ -124,17 +127,55 @@ def get_doc(doc_id):
     return DOCS[doc_id]
 
 
+SOURCE_TALK = re.compile(r",?\s*(?:as )?(?:exemplified |discussed |described |shown |stated |mentioned |presented |given )?(?:in|from|according to|by) the (?:provided |given |lecture )?(?:excerpt|text|passage|notes|slides?|lecture)"
+                         r"(?: (?:on|from) page \d+)?|^\s*(?:on|from) page \d+,?\s*|,?\s*\((?:on )?p(?:age|\.) ?\d+\)", re.I)
+
+
 def clean(q):
     """Normalise one generated question and shuffle MCQ options so the answer letter is random."""
+    q["question"] = SOURCE_TALK.sub("", q["question"]).strip()
+    q["question"] = q["question"][:1].upper() + q["question"][1:]
     if q["type"] == "tf" or len(q["choices"]) < 2:
         right = q["choices"][q["answer_index"]] if 0 <= q["answer_index"] < len(q["choices"]) else "True"
         q["type"], q["choices"] = "tf", ["True", "False"]
         q["answer_index"] = 0 if str(right).strip().lower().startswith("t") else 1
         return q
-    right = q["choices"][q["answer_index"]]
+    q["choices"] = list(dict.fromkeys(str(c) for c in q["choices"]))[:4]  # small models sometimes repeat options
+    right = q["choices"][min(max(q["answer_index"], 0), len(q["choices"]) - 1)]
     random.shuffle(q["choices"])
     q["answer_index"] = q["choices"].index(right)
     return q
+
+
+def words(text):
+    return set(tokenize(SOURCE_TALK.sub("", text))) - {"what", "which", "who", "does", "did", "do", "s", "following", "mentioned"}
+
+
+def is_repeat(text, seen):
+    """Near-duplicate if 75%+ of the shorter question's key words appear in an earlier one."""
+    w = words(text)
+    return any(len(w & s) >= 0.75 * min(len(w), len(s)) for s in seen if s and w)
+
+
+def generate(n, extra, chunks, asked):
+    """Ask the model for n questions and drop repeats in code.
+    Past questions are NOT put in the prompt: small models copy any question they're shown."""
+    seen, out = [words(s) for s in asked], []
+    for attempt in range(3):  # ponytail: up to 2 retries with shuffled notes + more randomness
+        notes = chunks if attempt == 0 else random.sample(chunks, len(chunks))
+        raw = llm(EXAMINER, f"Write {n - len(out)} questions.{extra}\n\nLecture notes:\n{context(notes)}",
+                  schema=QUIZ_SCHEMA, temperature=0.4 + 0.3 * attempt)
+        try:
+            batch = [clean(q) for q in json.loads(raw)["questions"] if q.get("choices") and q.get("question")]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            batch = []
+        for q in batch:
+            if not is_repeat(q["question"], seen):
+                seen.append(words(q["question"]))
+                out.append(q)
+        if len(out) >= n:
+            break
+    return out[:n]
 
 
 # ---------- routes ----------
@@ -173,9 +214,10 @@ class Ask(BaseModel):
 def ask(body: Ask):
     doc = get_doc(body.doc_id)
     hits = doc["index"].search(body.question) or doc["chunks"][:6]
-    answer = claude(
+    answer = llm(
         "You are a study assistant. Answer ONLY from the lecture excerpts given. "
-        "Cite pages inline like (p. 3). If the excerpts don't contain the answer, say so.",
+        "End every sentence with the page it came from, like this: Sprints last 2-4 weeks (p. 3). "
+        "If the excerpts don't contain the answer, say so.",
         f"Lecture excerpts:\n{context(hits)}\n\nQuestion: {body.question}",
     )
     return {"answer": answer, "pages": sorted({c["page"] for c in hits})}
@@ -200,22 +242,23 @@ def quiz(body: QuizReq):
         weak = [w["topic"] for w in weak_topics(p)]
         if not recent:
             raise HTTPException(400, "No open mistakes. Take a quiz first, then drill what you got wrong.")
-        extra = "\n\nThe student got these wrong. Re-test each concept from a DIFFERENT angle (new wording, " \
-                "the opposite True/False, or the confusing term as the correct answer):\n" + \
-                "\n".join(f"- [{m['topic']}] {m['question']} (picked \"{m['picked']}\", correct \"{m['correct']}\")" for m in recent)
+        # only the concept + fact, never the old question text: small models copy whatever question they're shown
+        extra = "\n\nThe student got these concepts wrong. Write one brand-new question per concept, testing the same fact " \
+                "from a different angle (e.g. ask it in reverse, or as True/False):\n" + \
+                "\n".join(f"- Concept: {m['topic']}. Correct fact: {m.get('why') or m['correct']}. "
+                          f"The student confused it with: {m['picked']}." for m in recent)
         if weak:
             extra += "\nWeakest topics overall: " + ", ".join(weak)
-        chunks = doc["index"].search(" ".join(m["question"] + " " + m["correct"] for m in recent), k=12)
+        chunks = doc["index"].search(" ".join(m["question"] + " " + m["correct"] for m in recent), k=8)
     elif body.topic:
         chunks = doc["index"].search(body.topic, k=12)
     else:
         step = max(1, len(doc["chunks"]) // (20 if body.mode == "mock" else 10))
         chunks = doc["chunks"][::step][:20]
     chunks = chunks or doc["chunks"][:10]
-    asked = "\n".join(f"- {s}" for s in p["asked"][-80:]) or "(none)"
-    raw = claude(EXAMINER, f"Write {n} questions.{extra}\n\nAlready asked:\n{asked}\n\nLecture excerpts:\n{context(chunks)}",
-                 schema=QUIZ_SCHEMA)
-    questions = [clean(q) for q in json.loads(raw)["questions"]][:n]
+    questions = generate(n, extra, chunks, p["asked"])
+    if not questions:
+        raise HTTPException(502, "The local model returned no usable questions. Try again.")
     quiz_id = uuid.uuid4().hex[:10]
     QUIZZES[quiz_id] = {"doc_id": body.doc_id, "mode": body.mode, "questions": questions, "targets": targets}
     p["asked"] += [q["question"] for q in questions]
@@ -246,7 +289,7 @@ def submit(quiz_id: str, body: Submit):
         if not ok:
             picked = q["choices"][a] if a is not None and 0 <= a < len(q["choices"]) else "(blank)"
             p["mistakes"].append({"question": q["question"], "picked": picked, "correct": q["choices"][q["answer_index"]],
-                                  "topic": q["topic"], "page": q["page"], "at": int(time.time())})
+                                  "topic": q["topic"], "page": q["page"], "why": q["why"], "at": int(time.time())})
             if q["type"] == "mcq" and a is not None:
                 wrong_letters.append("abcd"[a])
         results.append({**q, "picked": a})
