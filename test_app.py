@@ -69,3 +69,13 @@ assert app.generate(3, "", [], ["Spiral produces software late?"]) == []
 out = app.generate(3, "", [], [])
 assert len(out) == 1 and out[0]["question"] == "Spiral produces software late?"
 print("test_app.py OK")
+
+# OCR keeps confident lines only and ignores tiny images (logos)
+from types import SimpleNamespace
+from PIL import Image
+app._ocr = lambda arr: SimpleNamespace(txts=["Product owner", "defines the product", "x7#"], scores=[0.99, 0.95, 0.3])
+page = SimpleNamespace(images=[SimpleNamespace(image=Image.new("RGB", (800, 450))), SimpleNamespace(image=Image.new("RGB", (40, 40)))])
+assert app.ocr_page(page) == "Product owner defines the product"
+app._ocr = lambda arr: SimpleNamespace(txts=["20 771"], scores=[0.9])  # junk from a photo: under 3 words -> dropped
+assert app.ocr_page(page) == ""
+print("ocr OK")

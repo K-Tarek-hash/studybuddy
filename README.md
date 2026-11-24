@@ -4,7 +4,7 @@ An AI study assistant for lecture slides. Upload a PDF, ask questions and get an
 
 ## How it works
 
-1. **Ingest:** the app extracts text from the PDF with `pypdf` and splits each page into overlapping 180-word chunks. Each chunk keeps its page number.
+1. **Ingest:** the app extracts text from the PDF with `pypdf`. Slides that are only images (diagrams, screenshots) get **OCR**: the embedded images are read with RapidOCR, which runs offline, and only lines with 80%+ confidence are kept, so decorative photos don't add junk. OCR results are cached per PDF, so re-uploading the same file is instant. The text is then split into overlapping 180-word chunks, and each chunk keeps its page number.
 2. **Retrieve:** a **BM25 search engine written from scratch** (`search.py`, no vector database) ranks the chunks against your question.
 3. **Generate:** only the top-ranked chunks go to a **local LLM** (Qwen 2.5 3B through Ollama, free and offline, no API key). This keeps answers grounded in the lecture and makes page citations possible. This is retrieval-augmented generation (RAG).
 4. **Quiz:** The local model writes Moodle-style exam questions (multiple choice with a–d, plus True/False) in a fixed JSON format (JSON schema-constrained output). False True/False statements flip one key word, and wrong options are similar-sounding terms. The server shuffles the options so the right letter is random, and keeps the answers hidden until you submit.
@@ -13,7 +13,7 @@ An AI study assistant for lecture slides. Upload a PDF, ask questions and get an
 Modes: **New quiz** (10), **Drill my mistakes** (5), **Mock exam** (30).
 
 ```
-PDF ─► pypdf ─► chunker ─► BM25 index ─► top-k chunks ─► LLM ─► answer + page refs
+PDF ─► pypdf (+ OCR for image slides) ─► chunker ─► BM25 index ─► top-k chunks ─► LLM ─► answer + page refs
                                                      └─► LLM (JSON schema) ─► quiz
 ```
 
@@ -45,6 +45,6 @@ python test_app.py  # quiz -> mistakes -> drill loop, with the model mocked
 ## Roadmap
 
 - Save documents in SQLite so they survive a restart
-- OCR for scanned PDFs
+- OCR for handwritten scans (RapidOCR handles printed text only)
 - Ask questions across several PDFs
 - Spaced-repetition review of quiz questions you got wrong

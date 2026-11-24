@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -191,18 +192,73 @@ async def upload(file: UploadFile):
     data = await file.read()
     if len(data) > 30 * 1024 * 1024:
         raise HTTPException(400, "PDF too large (30 MB max)")
+    doc_id = hashlib.sha1(data).hexdigest()[:12]  # same PDF -> same id -> your progress comes back
     try:
-        pages = [p.extract_text() or "" for p in PdfReader(io.BytesIO(data)).pages]
+        pages, ocr_pages = await run_in_threadpool(read_pages, data, doc_id)
     except Exception:
         raise HTTPException(400, "Could not read that PDF")
     chunks = chunk_pages(pages)
     if not chunks:
-        raise HTTPException(400, "No text found (scanned PDFs aren't supported yet)")
-    doc_id = hashlib.sha1(data).hexdigest()[:12]  # same PDF -> same id -> your progress comes back
+        raise HTTPException(400, "No readable text found, even with OCR")
     DOCS[doc_id] = {"name": file.filename, "pages": len(pages), "chunks": chunks, "index": BM25(chunks)}
     progress_for(doc_id)["name"] = file.filename
     save_progress()
-    return {"id": doc_id, "name": file.filename, "pages": len(pages), "chunks": len(chunks)}
+    return {"id": doc_id, "name": file.filename, "pages": len(pages), "chunks": len(chunks), "ocr_pages": ocr_pages}
+
+
+# ---------- OCR for image-only slides ----------
+OCR_MIN_WORDS = 15      # pages with fewer selectable words than this get their images OCR'd
+OCR_MIN_CONF = 0.8      # drop OCR lines below this confidence (photos, handwriting -> junk)
+_ocr = None
+
+
+def ocr_engine():
+    global _ocr
+    if _ocr is None:
+        try:
+            import logging
+            from rapidocr import RapidOCR
+            logging.getLogger("RapidOCR").setLevel(logging.ERROR)
+            _ocr = RapidOCR()
+        except ImportError:  # OCR is optional: without it, image-only slides are just skipped
+            _ocr = False
+    return _ocr
+
+
+def ocr_page(page):
+    engine = ocr_engine()
+    if not engine:
+        return ""
+    import numpy as np
+    lines = []
+    for im in page.images:
+        try:
+            img = im.image.convert("RGB")
+        except Exception:
+            continue
+        if min(img.size) < 100:  # logos and icons
+            continue
+        res = engine(np.array(img))
+        lines += [t for t, s in zip(res.txts or [], res.scores or []) if s >= OCR_MIN_CONF]
+    text = " ".join(lines)
+    return text if len(text.split()) >= 3 else ""
+
+
+def read_pages(data, doc_id):
+    """Page texts, with OCR for image-only pages. Cached per PDF because OCR takes ~1-2 s per image."""
+    cache = ROOT / "data" / "pages" / f"{doc_id}.json"
+    if cache.exists():
+        c = json.loads(cache.read_text(encoding="utf-8"))
+        return c["pages"], c["ocr_pages"]
+    pages, ocr_pages = [], 0
+    for p in PdfReader(io.BytesIO(data)).pages:
+        text = p.extract_text() or ""
+        if len(text.split()) < OCR_MIN_WORDS and (extra := ocr_page(p)):
+            text, ocr_pages = f"{text}\n{extra}", ocr_pages + 1
+        pages.append(text)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"pages": pages, "ocr_pages": ocr_pages}), encoding="utf-8")
+    return pages, ocr_pages
 
 
 class Ask(BaseModel):

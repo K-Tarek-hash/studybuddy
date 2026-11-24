@@ -2,3 +2,6 @@ fastapi
 uvicorn
 python-multipart
 pypdf
+pillow          # pypdf image extraction for OCR
+rapidocr        # OCR for image-only slides (optional)
+onnxruntime
