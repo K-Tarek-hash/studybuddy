@@ -7,7 +7,10 @@ An AI study assistant for lecture slides. Upload a PDF, ask questions and get an
 1. **Ingest:** the app extracts text from the PDF with `pypdf` and splits each page into overlapping 180-word chunks. Each chunk keeps its page number.
 2. **Retrieve:** a **BM25 search engine written from scratch** (`search.py`, no vector database) ranks the chunks against your question.
 3. **Generate:** only the top-ranked chunks go to Claude (`claude-opus-5-5`). This keeps answers grounded in the lecture and makes page citations possible. This is retrieval-augmented generation (RAG).
-4. **Quiz:** Claude returns questions in a fixed JSON format (structured outputs). The frontend renders them as a self-grading quiz.
+4. **Quiz:** Claude writes Moodle-style exam questions (multiple choice with a–d, plus True/False) in a fixed JSON format (structured outputs). False True/False statements flip one key word, and wrong options are similar-sounding terms. The server shuffles the options so the right letter is random, and keeps the answers hidden until you submit.
+5. **Remembers your mistakes:** grading happens on the server. Every wrong answer and per-topic accuracy is saved under the PDF's hash, so progress comes back when you re-upload the same file. **Drill my mistakes** generates 5 new questions that re-test those exact concepts from a different angle. Passing the drill (80%+) clears them. Questions are never repeated, and the app flags guessing patterns such as always picking "a".
+
+Modes: **New quiz** (10), **Drill my mistakes** (5), **Mock exam** (30).
 
 ```
 PDF ─► pypdf ─► chunker ─► BM25 index ─► top-k chunks ─► Claude ─► answer + page refs
@@ -32,6 +35,7 @@ Then open http://localhost:8000.
 
 ```bash
 python search.py    # self-check for chunking and BM25 ranking
+python test_app.py  # quiz -> mistakes -> drill loop, with Claude mocked
 ```
 
 ## Roadmap
