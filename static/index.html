@@ -2,109 +2,285 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>StudyBuddy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <style>
-  :root { --bg:#f7f7f8; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --accent:#4f46e5; --ok:#15803d; --bad:#b91c1c; --line:#e3e3e6; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111113; --card:#1c1c1f; --ink:#ececef; --muted:#9a9aa2; --accent:#818cf8; --ok:#4ade80; --bad:#f87171; --line:#2e2e33; } }
-  * { box-sizing:border-box; }
-  body { margin:0; font:16px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
-  main { max-width:760px; margin:0 auto; padding:24px 16px 64px; }
-  h1 { margin:0 0 4px; } .muted { color:var(--muted); }
-  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
-  input[type=text], input[type=number] { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
-  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:wait; }
-  .row { display:flex; gap:8px; margin-top:8px; } .row > input { flex:1; }
-  .answer { white-space:pre-wrap; margin-top:12px; }
-  .q { margin-top:16px; } .choice { display:block; width:100%; text-align:left; margin-top:6px; background:var(--bg); color:var(--ink); border:1px solid var(--line); }
-  .choice.right { border-color:var(--ok); color:var(--ok); } .choice.wrong { border-color:var(--bad); color:var(--bad); }
-  [hidden] { display:none !important; }
+/* Layout: one exam-paper column. Study tools on top; the exam sheet below with a sticky progress strip. */
+:root{
+  --paper:#f5f7fa; --sheet:#ffffff; --ink:#1b2433; --muted:#5d6878; --rule:#dbe1ea;
+  --accent:#2f5bab; --accent-soft:#e7eefa;
+  --good:#1f7a4d; --good-soft:#e3f3ea; --bad:#b3372f; --bad-soft:#f8e6e4; --warn:#9a6a00;
+  --display:"Literata", Georgia, "Times New Roman", serif;
+  --body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#11161e; --sheet:#18202b; --ink:#e4e9f1; --muted:#9aa6b6; --rule:#2a3442;
+  --accent:#8fb1ee; --accent-soft:#1f2c42;
+  --good:#5fc58f; --good-soft:#173226; --bad:#f08a80; --bad-soft:#3a1d1b; --warn:#e0b450; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#11161e; --sheet:#18202b; --ink:#e4e9f1; --muted:#9aa6b6; --rule:#2a3442;
+  --accent:#8fb1ee; --accent-soft:#1f2c42;
+  --good:#5fc58f; --good-soft:#173226; --bad:#f08a80; --bad-soft:#3a1d1b; --warn:#e0b450; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:0 64px}
+.wrap{max-width:760px;margin:0 auto}
+[hidden]{display:none !important}
+header.top{padding-block:40px 12px;display:grid;gap:8px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(28px,5vw,40px);line-height:1.15;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-size:19px;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:14px}
+.meta b{color:var(--ink);font-weight:600}
+.card{margin-top:14px;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;display:grid;gap:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row > input[type=text]{flex:1;min-width:180px}
+input[type=text]{font:inherit;padding:10px 12px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);color:var(--ink)}
+input[type=file]{font:inherit;color:var(--muted);max-width:100%}
+.answer{white-space:pre-wrap;max-width:65ch}
+.muted{color:var(--muted);font-size:14px;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-size:13px;border:1px solid var(--rule);border-radius:999px;padding:3px 10px;background:var(--paper)}
+.chip b{font-family:var(--mono);font-weight:500;color:var(--bad)}
+.hist{display:flex;flex-wrap:wrap;gap:6px;font-family:var(--mono);font-size:13px;color:var(--muted)}
+.strip{position:sticky;top:0;z-index:5;background:var(--paper);padding-block:10px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:14px;margin-top:24px}
+.bar{flex:1;height:6px;border-radius:3px;background:var(--rule);overflow:hidden;min-width:0}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+.count{font-family:var(--mono);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.result{scroll-margin-top:60px;margin-top:20px;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:22px;display:grid;gap:16px}
+.score{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.score .num{font-family:var(--display);font-size:48px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.score .verdict{font-weight:600}
+.saved{font-size:14px;color:var(--good);margin:0}
+.pattern{font-size:14px;color:var(--warn);margin:0}
+.bylec{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.bylec div{border:1px solid var(--rule);border-radius:8px;padding:10px 12px;display:grid;gap:2px;min-width:0}
+.bylec span{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bylec b{font-variant-numeric:tabular-nums;font-size:18px}
+.tools{display:flex;flex-wrap:wrap;gap:10px}
+ol.qs{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}
+.q{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;display:grid;gap:12px}
+.qhead{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.qn{font-family:var(--display);font-weight:700;font-size:17px}
+.tag{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:right}
+.stem{margin:0;max-width:65ch}
+.opts{display:grid;gap:6px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:7px;border:1px solid transparent;cursor:pointer}
+.opt:hover{background:var(--accent-soft)}
+.opt input{margin-top:5px;accent-color:var(--accent);flex:none}
+.opt .letter{font-family:var(--mono);font-size:13px;color:var(--muted);min-width:1.4em;padding-top:2px}
+.opt span:last-child{min-width:0}
+.graded .opt{cursor:default}
+.graded .opt:hover{background:none}
+.opt.right{background:var(--good-soft);border-color:var(--good)}
+.opt.wrong{background:var(--bad-soft);border-color:var(--bad)}
+.q.is-right{border-left:4px solid var(--good)}
+.q.is-wrong{border-left:4px solid var(--bad)}
+.q.is-blank{border-left:4px solid var(--warn)}
+.why{font-size:14px;color:var(--muted);border-top:1px dashed var(--rule);padding-top:10px;display:grid;gap:4px}
+.why b{color:var(--ink)}
+.mark{font-family:var(--mono);font-size:12px;font-weight:500}
+.mark.r{color:var(--good)} .mark.w{color:var(--bad)} .mark.b{color:var(--warn)}
+.foot{margin-top:24px;display:grid;gap:10px;justify-items:start}
+.note{font-size:14px;color:var(--warn);margin:0}
+button{font-family:var(--body);font-size:15px;font-weight:600;border-radius:8px;padding:11px 18px;cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:var(--sheet)}
+button.ghost{background:transparent;color:var(--accent)}
+button:disabled{opacity:.5;cursor:wait}
+button:focus-visible,.opt:focus-within,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hide-right .q.is-right{display:none}
+@media (max-width:560px){.bylec{grid-template-columns:repeat(2,minmax(0,1fr))}.q,.card{padding:16px}}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
 </head>
 <body>
-<main>
-  <h1>StudyBuddy</h1>
-  <p class="muted">Upload a lecture PDF, ask questions about it, and quiz yourself.</p>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow" id="eyebrow">StudyBuddy · Study coach</div>
+    <h1 id="title">Upload a lecture to start</h1>
+    <div class="meta" id="docMeta">Ask questions about your slides, take Moodle-style quizzes, and drill the questions you got wrong.</div>
+  </header>
 
-  <section>
-    <label for="file"><strong>1. Upload lecture PDF</strong></label>
-    <div class="row"><input id="file" type="file" accept="application/pdf"><button id="upBtn">Upload</button></div>
-    <p id="docInfo" class="muted"></p>
+  <section class="card">
+    <h2>Lecture PDF</h2>
+    <div class="row"><input id="file" type="file" accept="application/pdf" aria-label="Lecture PDF"><button id="upBtn">Upload</button></div>
   </section>
 
-  <section id="work" hidden>
-    <label for="question"><strong>2. Ask a question</strong></label>
-    <div class="row"><input id="question" type="text" placeholder="e.g. What is the time complexity of merge sort?"><button id="askBtn">Ask</button></div>
-    <div id="answer" class="answer"></div>
-  </section>
+  <div id="tools" hidden>
+    <section class="card">
+      <h2>Your progress</h2>
+      <p class="muted" id="progText">No quizzes yet.</p>
+      <div class="hist" id="hist"></div>
+      <div class="chips" id="weak"></div>
+    </section>
 
-  <section id="quizBox" hidden>
-    <label for="topic"><strong>3. Quiz me</strong></label>
-    <div class="row"><input id="topic" type="text" placeholder="Topic (optional)"><input id="count" type="number" min="1" max="15" value="5" style="max-width:80px" aria-label="Number of questions"><button id="quizBtn">Generate</button></div>
-    <p id="score" class="muted"></p>
-    <div id="quiz"></div>
-  </section>
-</main>
+    <section class="card">
+      <h2>Practice</h2>
+      <div class="row"><input id="topic" type="text" placeholder="Focus on a topic (optional)" aria-label="Topic"></div>
+      <div class="tools">
+        <button id="newQuiz" data-mode="quiz">New quiz · 10</button>
+        <button id="drill" class="ghost" data-mode="drill">Drill my mistakes · 5</button>
+        <button id="mock" class="ghost" data-mode="mock">Mock exam · 30</button>
+      </div>
+      <p class="note" id="genNote" hidden></p>
+    </section>
+
+    <section class="card">
+      <h2>Ask about the lecture</h2>
+      <div class="row"><input id="question" type="text" placeholder="e.g. What is the difference between a sprint review and a retrospective?" aria-label="Question"><button id="askBtn">Ask</button></div>
+      <div class="answer" id="answer"></div>
+    </section>
+  </div>
+
+  <div id="exam" hidden>
+    <div class="strip" role="status"><div class="bar"><i id="barfill"></i></div><span class="count" id="count">0 answered</span></div>
+
+    <section class="result" id="result" hidden>
+      <div class="score"><span class="num" id="scoreNum">0</span><span class="verdict" id="verdict"></span></div>
+      <p class="saved" id="saved"></p>
+      <p class="pattern" id="pattern" hidden></p>
+      <div class="bylec" id="bylec"></div>
+      <div class="tools">
+        <button type="button" id="nextDrill">Drill these mistakes</button>
+        <button type="button" class="ghost" id="toggleRight">Show only mistakes</button>
+        <button type="button" class="ghost" id="nextQuiz">New quiz</button>
+      </div>
+    </section>
+
+    <form id="sheet" novalidate>
+      <h2 id="quizTitle" style="margin-top:20px"></h2>
+      <ol class="qs" id="qs"></ol>
+      <div class="foot" id="foot">
+        <p class="note" id="note" hidden></p>
+        <button type="submit" id="submit">Submit and show answers</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
-let docId = null;
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const L = "abcd";
+const form = $("sheet"), list = $("qs");
+let docId = null, quiz = null, graded = false, confirmBlank = false;
 
-async function call(url, opts, btn) {
-  btn.disabled = true;
+async function api(url, body, btn) {
+  if (btn) btn.disabled = true;
   try {
+    const opts = body instanceof FormData ? {method:"POST", body} : body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {};
     const r = await fetch(url, opts);
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || r.statusText);
-    return data;
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    return d;
   } catch (e) { alert(e.message); return null; }
-  finally { btn.disabled = false; }
+  finally { if (btn) btn.disabled = false; }
 }
-const post = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/* ---------- upload + progress ---------- */
 $("upBtn").onclick = async () => {
   const f = $("file").files[0];
   if (!f) return alert("Choose a PDF first");
   const fd = new FormData(); fd.append("file", f);
-  const d = await call("/upload", { method: "POST", body: fd }, $("upBtn"));
+  const d = await api("/upload", fd, $("upBtn"));
   if (!d) return;
   docId = d.id;
-  $("docInfo").textContent = `Loaded "${d.name}" (${d.pages} pages, ${d.chunks} chunks indexed)`;
-  $("work").hidden = $("quizBox").hidden = false;
+  $("eyebrow").textContent = "StudyBuddy · " + d.pages + " pages";
+  $("title").textContent = d.name.replace(/\.pdf$/i, "");
+  $("docMeta").innerHTML = `<span><b>${d.pages}</b> pages</span><span><b>${d.chunks}</b> sections indexed</span><span>Progress is saved for this PDF</span>`;
+  $("tools").hidden = false;
+  loadProgress();
 };
 
+async function loadProgress() {
+  const p = await api("/progress/" + docId);
+  if (!p) return;
+  const h = p.history;
+  $("progText").textContent = h.length ? `${p.open_mistakes} open mistake${p.open_mistakes === 1 ? "" : "s"} to drill.` : "No quizzes yet. Start with a new quiz.";
+  $("hist").innerHTML = h.map(x => `<span>${esc(x.mode)} ${x.score}/${x.total}</span>`).join(" · ");
+  $("weak").innerHTML = p.weak_topics.length ? `<span class="muted">Weak topics:</span>` + p.weak_topics.map(w => `<span class="chip">${esc(w.topic)} <b>${w.right}/${w.total}</b></span>`).join("") : "";
+  $("drill").disabled = !p.open_mistakes;
+}
+
+/* ---------- ask ---------- */
 $("askBtn").onclick = async () => {
   const q = $("question").value.trim(); if (!q) return;
-  $("answer").textContent = "Thinking...";
-  const d = await call("/ask", post({ doc_id: docId, question: q }), $("askBtn"));
+  $("answer").textContent = "Reading your slides...";
+  const d = await api("/ask", {doc_id: docId, question: q}, $("askBtn"));
   $("answer").textContent = d ? `${d.answer}\n\nSearched pages: ${d.pages.join(", ")}` : "";
 };
 $("question").onkeydown = e => { if (e.key === "Enter") $("askBtn").click(); };
 
-$("quizBtn").onclick = async () => {
-  $("quiz").textContent = "Writing questions..."; $("score").textContent = "";
-  const d = await call("/quiz", post({ doc_id: docId, topic: $("topic").value, count: +$("count").value }), $("quizBtn"));
-  $("quiz").textContent = "";
+/* ---------- quiz ---------- */
+async function startQuiz(mode, btn) {
+  $("genNote").textContent = mode === "mock" ? "Writing 30 questions, this takes a minute..." : "Writing your questions...";
+  $("genNote").hidden = false;
+  const d = await api("/quiz", {doc_id: docId, mode, topic: $("topic").value.trim()}, btn);
+  $("genNote").hidden = true;
   if (!d) return;
-  let right = 0, done = 0;
-  d.questions.forEach((q, i) => {
-    const div = document.createElement("div"); div.className = "q";
-    const h = document.createElement("p"); h.innerHTML = `<strong>${i + 1}.</strong> `; h.append(q.question); div.append(h);
-    const expl = document.createElement("p"); expl.className = "muted"; expl.hidden = true;
-    expl.textContent = `${q.explanation} (p. ${q.page})`;
-    q.choices.forEach((c, j) => {
-      const b = document.createElement("button"); b.className = "choice"; b.textContent = c;
-      b.onclick = () => {
-        div.querySelectorAll(".choice").forEach((x, k) => { x.disabled = true; if (k === q.answer_index) x.classList.add("right"); });
-        if (j === q.answer_index) right++; else b.classList.add("wrong");
-        expl.hidden = false; done++;
-        $("score").textContent = `Score: ${right} / ${done}` + (done === d.questions.length ? " (done)" : "");
-      };
-      div.append(b);
-    });
-    div.append(expl); $("quiz").append(div);
+  quiz = d; graded = false; confirmBlank = false;
+  form.className = ""; $("result").hidden = true; $("foot").hidden = false; $("note").hidden = true;
+  $("toggleRight").textContent = "Show only mistakes";
+  $("quizTitle").textContent = d.title + " · " + d.questions.length + " questions, 1 mark each";
+  render(); load(); progress();
+  $("exam").hidden = false;
+  $("exam").scrollIntoView({behavior: "smooth"});
+}
+["newQuiz", "drill", "mock"].forEach(id => $(id).onclick = e => startQuiz(e.currentTarget.dataset.mode, e.currentTarget));
+$("nextDrill").onclick = e => startQuiz("drill", e.currentTarget);
+$("nextQuiz").onclick = e => startQuiz("quiz", e.currentTarget);
+
+function render() {
+  list.innerHTML = quiz.questions.map((q, i) => `<li class="q" id="q${i}"><div class="qhead"><span class="qn">Question ${i + 1}</span><span class="tag">${esc(q.topic)} · p.${q.page}<span class="mark" id="m${i}"></span></span></div>
+  <p class="stem">${esc(q.question)}</p><div class="opts">${q.choices.map((t, j) => `<label class="opt" id="o${i}_${j}"><input type="radio" name="q${i}" id="r${i}_${j}" value="${j}"><span class="letter">${q.type === "tf" ? "" : L[j] + "."}</span><span>${esc(t)}</span></label>`).join("")}</div>
+  <div class="why" id="w${i}" hidden></div></li>`).join("");
+}
+function answers() { return quiz.questions.map((q, i) => { const c = form.querySelector(`input[name="q${i}"]:checked`); return c ? +c.value : null; }); }
+function progress() { const n = answers().filter(v => v !== null).length, N = quiz.questions.length; $("count").textContent = `${n} / ${N} answered`; $("barfill").style.width = (n / N * 100) + "%"; }
+const key = () => "studybuddy-" + quiz.quiz_id;
+function save() { try { localStorage.setItem(key(), JSON.stringify(answers())); } catch (e) {} }
+function load() { try { const a = JSON.parse(localStorage.getItem(key()) || "null"); if (Array.isArray(a)) a.forEach((v, i) => { if (v !== null) { const r = $(`r${i}_${v}`); if (r) r.checked = true; } }); } catch (e) {} }
+
+form.addEventListener("change", () => { if (graded) return; progress(); save(); $("note").hidden = true; confirmBlank = false; });
+form.addEventListener("submit", async e => {
+  e.preventDefault(); if (graded) return;
+  const a = answers(), blank = a.filter(v => v === null).length;
+  if (blank && !confirmBlank) { $("note").textContent = `${blank} question${blank > 1 ? "s are" : " is"} unanswered. Press Submit again to grade anyway.`; $("note").hidden = false; confirmBlank = true; return; }
+  const d = await api(`/quiz/${quiz.quiz_id}/submit`, {answers: a}, $("submit"));
+  if (d) grade(d);
+});
+
+function grade(d) {
+  graded = true; form.classList.add("graded");
+  const N = d.total, topics = {};
+  d.results.forEach((q, i) => {
+    const li = $(`q${i}`), m = $(`m${i}`), w = $(`w${i}`), v = q.picked;
+    topics[q.topic] = topics[q.topic] || [0, 0]; topics[q.topic][1]++;
+    form.querySelectorAll(`input[name="q${i}"]`).forEach(r => r.disabled = true);
+    $(`o${i}_${q.answer_index}`).classList.add("right");
+    const ans = (q.type === "tf" ? "" : L[q.answer_index] + ". ") + q.choices[q.answer_index];
+    if (v === q.answer_index) { topics[q.topic][0]++; li.classList.add("is-right"); m.textContent = " · Correct"; m.className = "mark r"; }
+    else if (v === null) { li.classList.add("is-blank"); m.textContent = " · Not answered"; m.className = "mark b"; }
+    else { li.classList.add("is-wrong"); $(`o${i}_${v}`).classList.add("wrong"); m.textContent = " · Wrong"; m.className = "mark w"; }
+    w.innerHTML = `<span><b>Answer: ${esc(ans)}.</b> ${esc(q.why)}</span><span>💡 ${esc(q.hook)}</span>`; w.hidden = false;
   });
-};
+  const mistakes = N - d.score;
+  $("scoreNum").textContent = `${d.score}/${N}`;
+  $("verdict").textContent = d.score >= N * 0.9 ? "Solid. Move on." : d.score >= N * 0.7 ? "Close. Review the questions you missed." : "Re-read these slides, then drill your mistakes.";
+  $("saved").textContent = mistakes ? `Saved ${mistakes} mistake${mistakes > 1 ? "s" : ""} to your progress. Your next drill re-tests them from a different angle.` : "No mistakes. Nothing new to drill.";
+  $("pattern").textContent = d.pattern; $("pattern").hidden = !d.pattern;
+  $("nextDrill").hidden = !mistakes;
+  const ks = Object.keys(topics), bl = $("bylec");
+  bl.hidden = ks.length < 2;
+  bl.innerHTML = ks.map(k => `<div><span title="${esc(k)}">${esc(k)}</span><b>${topics[k][0]} / ${topics[k][1]}</b></div>`).join("");
+  $("result").hidden = false; $("foot").hidden = true;
+  try { localStorage.removeItem(key()); } catch (e) {}
+  $("result").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  loadProgress();
+}
+$("toggleRight").onclick = () => { const on = form.classList.toggle("hide-right"); $("toggleRight").textContent = on ? "Show all questions" : "Show only mistakes"; };
 </script>
 </body>
 </html>
