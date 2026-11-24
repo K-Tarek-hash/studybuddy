@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudyBuddy</title>
+<style>
+  :root { --bg:#f7f7f8; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --accent:#4f46e5; --ok:#15803d; --bad:#b91c1c; --line:#e3e3e6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111113; --card:#1c1c1f; --ink:#ececef; --muted:#9a9aa2; --accent:#818cf8; --ok:#4ade80; --bad:#f87171; --line:#2e2e33; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { margin:0 0 4px; } .muted { color:var(--muted); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  input[type=text], input[type=number] { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .row { display:flex; gap:8px; margin-top:8px; } .row > input { flex:1; }
+  .answer { white-space:pre-wrap; margin-top:12px; }
+  .q { margin-top:16px; } .choice { display:block; width:100%; text-align:left; margin-top:6px; background:var(--bg); color:var(--ink); border:1px solid var(--line); }
+  .choice.right { border-color:var(--ok); color:var(--ok); } .choice.wrong { border-color:var(--bad); color:var(--bad); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>StudyBuddy</h1>
+  <p class="muted">Upload a lecture PDF, ask questions about it, and quiz yourself.</p>
+
+  <section>
+    <label for="file"><strong>1. Upload lecture PDF</strong></label>
+    <div class="row"><input id="file" type="file" accept="application/pdf"><button id="upBtn">Upload</button></div>
+    <p id="docInfo" class="muted"></p>
+  </section>
+
+  <section id="work" hidden>
+    <label for="question"><strong>2. Ask a question</strong></label>
+    <div class="row"><input id="question" type="text" placeholder="e.g. What is the time complexity of merge sort?"><button id="askBtn">Ask</button></div>
+    <div id="answer" class="answer"></div>
+  </section>
+
+  <section id="quizBox" hidden>
+    <label for="topic"><strong>3. Quiz me</strong></label>
+    <div class="row"><input id="topic" type="text" placeholder="Topic (optional)"><input id="count" type="number" min="1" max="15" value="5" style="max-width:80px" aria-label="Number of questions"><button id="quizBtn">Generate</button></div>
+    <p id="score" class="muted"></p>
+    <div id="quiz"></div>
+  </section>
+</main>
+<script>
+let docId = null;
+const $ = id => document.getElementById(id);
+
+async function call(url, opts, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(url, opts);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    return data;
+  } catch (e) { alert(e.message); return null; }
+  finally { btn.disabled = false; }
+}
+const post = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+$("upBtn").onclick = async () => {
+  const f = $("file").files[0];
+  if (!f) return alert("Choose a PDF first");
+  const fd = new FormData(); fd.append("file", f);
+  const d = await call("/upload", { method: "POST", body: fd }, $("upBtn"));
+  if (!d) return;
+  docId = d.id;
+  $("docInfo").textContent = `Loaded "${d.name}" (${d.pages} pages, ${d.chunks} chunks indexed)`;
+  $("work").hidden = $("quizBox").hidden = false;
+};
+
+$("askBtn").onclick = async () => {
+  const q = $("question").value.trim(); if (!q) return;
+  $("answer").textContent = "Thinking...";
+  const d = await call("/ask", post({ doc_id: docId, question: q }), $("askBtn"));
+  $("answer").textContent = d ? `${d.answer}\n\nSearched pages: ${d.pages.join(", ")}` : "";
+};
+$("question").onkeydown = e => { if (e.key === "Enter") $("askBtn").click(); };
+
+$("quizBtn").onclick = async () => {
+  $("quiz").textContent = "Writing questions..."; $("score").textContent = "";
+  const d = await call("/quiz", post({ doc_id: docId, topic: $("topic").value, count: +$("count").value }), $("quizBtn"));
+  $("quiz").textContent = "";
+  if (!d) return;
+  let right = 0, done = 0;
+  d.questions.forEach((q, i) => {
+    const div = document.createElement("div"); div.className = "q";
+    const h = document.createElement("p"); h.innerHTML = `<strong>${i + 1}.</strong> `; h.append(q.question); div.append(h);
+    const expl = document.createElement("p"); expl.className = "muted"; expl.hidden = true;
+    expl.textContent = `${q.explanation} (p. ${q.page})`;
+    q.choices.forEach((c, j) => {
+      const b = document.createElement("button"); b.className = "choice"; b.textContent = c;
+      b.onclick = () => {
+        div.querySelectorAll(".choice").forEach((x, k) => { x.disabled = true; if (k === q.answer_index) x.classList.add("right"); });
+        if (j === q.answer_index) right++; else b.classList.add("wrong");
+        expl.hidden = false; done++;
+        $("score").textContent = `Score: ${right} / ${done}` + (done === d.questions.length ? " (done)" : "");
+      };
+      div.append(b);
+    });
+    div.append(expl); $("quiz").append(div);
+  });
+};
+</script>
+</body>
+</html>
