@@ -91,6 +91,8 @@ button.ghost{background:transparent;color:var(--accent)}
 button:disabled{opacity:.5;cursor:wait}
 button:focus-visible,.opt:focus-within,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hide-right .q.is-right{display:none}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;max-width:min(560px,calc(100% - 32px));
+  background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);border-radius:8px;padding:10px 14px;font-size:14px;font-weight:500}
 @media (max-width:560px){.bylec{grid-template-columns:repeat(2,minmax(0,1fr))}.q,.card{padding:16px}}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
@@ -160,6 +162,7 @@ button:focus-visible,.opt:focus-within,input:focus-visible{outline:2px solid var
   </div>
 </div>
 
+<div class="toast" id="toast" role="alert" hidden></div>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -167,6 +170,11 @@ const L = "abcd";
 const form = $("sheet"), list = $("qs");
 let docId = null, quiz = null, graded = false, confirmBlank = false;
 
+// errors show on the page (alert() popups are blocked in some embedded browsers)
+function showError(msg) {
+  const t = $("toast"); t.textContent = "⚠ " + msg; t.hidden = false;
+  clearTimeout(showError.timer); showError.timer = setTimeout(() => t.hidden = true, 8000);
+}
 async function api(url, body, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -175,14 +183,14 @@ async function api(url, body, btn) {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
     return d;
-  } catch (e) { alert(e.message); return null; }
+  } catch (e) { showError(e.message); return null; }
   finally { if (btn) btn.disabled = false; }
 }
 
 /* ---------- upload + progress ---------- */
 $("upBtn").onclick = async () => {
   const f = $("file").files[0];
-  if (!f) return alert("Choose a PDF first");
+  if (!f) return showError("Choose a PDF first");
   const fd = new FormData(); fd.append("file", f);
   const d = await api("/upload", fd, $("upBtn"));
   if (!d) return;
@@ -207,15 +215,15 @@ async function loadProgress() {
 /* ---------- ask ---------- */
 $("askBtn").onclick = async () => {
   const q = $("question").value.trim(); if (!q) return;
-  $("answer").textContent = "Reading your slides...";
+  $("answer").textContent = "Reading your slides (the local model can take up to a minute)...";
   const d = await api("/ask", {doc_id: docId, question: q}, $("askBtn"));
-  $("answer").textContent = d ? `${d.answer}\n\nSearched pages: ${d.pages.join(", ")}` : "";
+  $("answer").textContent = d ? `${d.answer}\n\nSearched pages: ${d.pages.join(", ")}` : "Couldn't get an answer (see the message at the bottom).";
 };
 $("question").onkeydown = e => { if (e.key === "Enter") $("askBtn").click(); };
 
 /* ---------- quiz ---------- */
 async function startQuiz(mode, btn) {
-  $("genNote").textContent = mode === "mock" ? "Writing 30 questions, this takes a minute..." : "Writing your questions...";
+  $("genNote").textContent = mode === "mock" ? "Writing 30 questions on your PC, this takes about 5 minutes..." : "Writing your questions on your PC, this takes 1-2 minutes...";
   $("genNote").hidden = false;
   const d = await api("/quiz", {doc_id: docId, mode, topic: $("topic").value.trim()}, btn);
   $("genNote").hidden = true;
