@@ -108,6 +108,7 @@ button:focus-visible,.opt:focus-within,input:focus-visible{outline:2px solid var
   <section class="card">
     <h2>Lecture PDF</h2>
     <div class="row"><input id="file" type="file" accept="application/pdf" aria-label="Lecture PDF"><button id="upBtn">Upload</button></div>
+    <p class="note" id="upNote" hidden></p>
   </section>
 
   <div id="tools" hidden>
@@ -192,12 +193,16 @@ $("upBtn").onclick = async () => {
   const f = $("file").files[0];
   if (!f) return showError("Choose a PDF first");
   const fd = new FormData(); fd.append("file", f);
+  $("upNote").textContent = "Reading the PDF. Image-only slides are read with OCR, which can take a minute the first time...";
+  $("upNote").hidden = false;
   const d = await api("/upload", fd, $("upBtn"));
+  $("upNote").hidden = true;
   if (!d) return;
   docId = d.id;
   $("eyebrow").textContent = "StudyBuddy · " + d.pages + " pages";
   $("title").textContent = d.name.replace(/\.pdf$/i, "");
-  $("docMeta").innerHTML = `<span><b>${d.pages}</b> pages</span><span><b>${d.chunks}</b> sections indexed</span><span>Progress is saved for this PDF</span>`;
+  $("docMeta").innerHTML = `<span><b>${d.pages}</b> pages</span><span><b>${d.chunks}</b> sections indexed</span>` +
+    (d.ocr_pages ? `<span><b>${d.ocr_pages}</b> image slides read with OCR</span>` : "") + `<span>Progress is saved for this PDF</span>`;
   $("tools").hidden = false;
   loadProgress();
 };
